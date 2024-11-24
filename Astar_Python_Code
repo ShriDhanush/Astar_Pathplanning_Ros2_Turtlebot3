@@ -1,0 +1,118 @@
+import cv2
+import numpy as np
+import heapq
+import matplotlib.pyplot as plt
+
+def load_map(pgm_file, yaml_file):
+    # Load the map as a grayscale image
+    img = cv2.imread(pgm_file, cv2.IMREAD_GRAYSCALE)
+
+    # Convert the image to a binary grid (0 = free space, 1 = obstacle)
+    _, binary_map = cv2.threshold(img, 200, 1, cv2.THRESH_BINARY_INV)
+
+    # Load metadata from the YAML file
+    with open(yaml_file, 'r') as file:
+        data = file.readlines()
+
+    resolution = float([line for line in data if 'resolution' in line][0].split(': ')[1].strip())
+    origin = [float(val) for val in [line for line in data if 'origin' in line][0].split(': ')[1].strip()[1:-1].split(',')]
+
+    return binary_map, resolution, origin
+
+def heuristic(a, b):
+    # Use Manhattan distance as heuristic
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+def a_star(grid, start, goal):
+    rows, cols = grid.shape
+    open_set = [(0, start)]  # (cost, (x, y))
+    came_from = {}
+    g_score = {start: 0}
+    f_score = {start: heuristic(start, goal)}
+
+    # Define the movement directions (up, down, left, right, and diagonals)
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1),  # Up, down, left, right
+                  (-1, -1), (-1, 1), (1, -1), (1, 1)]  # Diagonals
+
+    while open_set:
+        current_cost, current_node = heapq.heappop(open_set)
+
+        if current_node == goal:
+            break
+
+        x, y = current_node
+        for dx, dy in directions:
+            neighbor = (x + dx, y + dy)
+            if 0 <= neighbor[0] < rows and 0 <= neighbor[1] < cols and grid[neighbor[0], neighbor[1]] == 0:
+                # Diagonal movements should have a higher cost
+                move_cost = 1.4 if dx != 0 and dy != 0 else 1
+                tentative_g_score = g_score[current_node] + move_cost
+
+                if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
+                    came_from[neighbor] = current_node
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal)
+
+                    if neighbor not in [i[1] for i in open_set]:
+                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+    # Reconstruct the path
+    path = []
+    if goal in came_from:
+        current = goal
+        while current is not None:
+            path.append(current)
+            current = came_from.get(current, None)
+        path.reverse()
+
+    return path, g_score.get(goal, float('inf'))
+
+
+def main():
+    # Load the map and convert it to a grid
+    map_grid, resolution, origin = load_map('/home/dhanush/ros2_ws/src/agvrobot_description/agvrobot_description/maze.pgm',
+                                             '/home/dhanush/ros2_ws/src/agvrobot_description/agvrobot_description/maze.yaml')
+
+    # Print the map grid for reference
+    print("Map grid (0 = free space, 1 = obstacle):")
+    print(map_grid)
+
+    # Set the start and goal positions based on your inspection
+    start = (5, 10)  # Set these based on your map
+    goal = (250, 250)  # Set these based on your map
+
+    # Verify if start and goal positions are valid
+    if map_grid[start] != 0:
+        print(f"Start position {start} is blocked!")
+        return
+    if map_grid[goal] != 0:
+        print(f"Goal position {goal} is blocked!")
+        return
+
+    # Run A* algorithm on the map
+    path, cost = a_star(map_grid, start, goal)
+
+    # Display the results
+    if path:
+        print("Path:", path)
+        print("Cost:", cost)
+    else:
+        print("Goal not reachable")
+        path = []  # Reset path if not reachable
+
+    # Visualize the path
+    plt.imshow(map_grid, cmap='gray')
+
+    if path:
+        path_x, path_y = zip(*path)
+        plt.plot(path_y, path_x, color='red', marker='o')  # Mark the path with red circles
+
+    # Mark start and goal points in the visualization
+    plt.scatter(start[1], start[0], color='green', s=100, label='Start')  # Start point
+    plt.scatter(goal[1], goal[0], color='blue', s=100, label='Goal')      # Goal point
+    plt.title("A* Path on Maze")
+    plt.legend()
+    plt.show()
+
+if __name__ == "__main__":
+    main()
